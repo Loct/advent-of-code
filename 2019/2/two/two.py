@@ -2,7 +2,7 @@ import math
 
 #data parsing
 data = []
-with open('data', 'r') as f:
+with open('../data', 'r') as f:
    data = f.readlines()
 
 data = data[0].split(',')
@@ -36,5 +36,14 @@ def brute_force(a, b, data):
         data[data[i+3]] = res
     return data
 
-brute_force(12, 0, data)
-print data[0]
+found = False
+for a in range (0, 100):
+    for b in range(0, 100):
+        d = brute_force(a, b, data)
+        if d[0] == 19690720:
+            print 'values', data[1], data[2], 'answer', data[1] * 100 + data[2]
+            found = True
+            break
+        data = org[:]
+    if found:
+        break    
