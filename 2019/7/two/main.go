@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 func readLines() []int64 {
@@ -97,37 +98,38 @@ func getValue(m mode, position int64, values []int64) int64 {
 	}
 }
 
-func newState(opCodePos int64, values []int64) []int64 {
+func newState(opCodePos int64, values []int64, inputs chan int64, output chan int64) []int64 {
 	opcode := getOpcode(values[opCodePos])
 	switch operator(opcode[3]) {
 	case opAddition:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		pos2Val := getValue(mode(opcode[1]), opCodePos+2, values)
 		setValue(mode(opcode[0]), pos1Val+pos2Val, opCodePos+3, values)
-		return newState(opCodePos+4, values)
+		return newState(opCodePos+4, values, inputs, output)
 	case opMultiplier:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		pos2Val := getValue(mode(opcode[1]), opCodePos+2, values)
 		setValue(mode(opcode[0]), pos1Val*pos2Val, opCodePos+3, values)
-		return newState(opCodePos+4, values)
+		return newState(opCodePos+4, values, inputs, output)
 	case opInput:
-		values[values[opCodePos+1]] = inputVal
-		return newState(opCodePos+2, values)
+		values[values[opCodePos+1]] = <-inputs
+		return newState(opCodePos+2, values, inputs, output)
 	case opOutput:
-		log.Printf("%d", values[values[opCodePos+1]])
-		return newState(opCodePos+2, values)
+		//log.Printf("%d", values[values[opCodePos+1]])
+		output <- values[values[opCodePos+1]]
+		return newState(opCodePos+2, values, inputs, output)
 	case opJumpTrue:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		if pos1Val != 0 {
-			return newState(getValue(mode(opcode[1]), opCodePos+2, values), values)
+			return newState(getValue(mode(opcode[1]), opCodePos+2, values), values, inputs, output)
 		}
-		return newState(opCodePos+3, values)
+		return newState(opCodePos+3, values, inputs, output)
 	case opJumpFalse:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		if pos1Val == 0 {
-			return newState(getValue(mode(opcode[1]), opCodePos+2, values), values)
+			return newState(getValue(mode(opcode[1]), opCodePos+2, values), values, inputs, output)
 		}
-		return newState(opCodePos+3, values)
+		return newState(opCodePos+3, values, inputs, output)
 	case opLessThan:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		pos2Val := getValue(mode(opcode[1]), opCodePos+2, values)
@@ -136,7 +138,7 @@ func newState(opCodePos int64, values []int64) []int64 {
 			val = 1
 		}
 		setValue(mode(opcode[0]), val, opCodePos+3, values)
-		return newState(opCodePos+4, values)
+		return newState(opCodePos+4, values, inputs, output)
 	case opEquals:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		pos2Val := getValue(mode(opcode[1]), opCodePos+2, values)
@@ -145,22 +147,115 @@ func newState(opCodePos int64, values []int64) []int64 {
 			val = 1
 		}
 		setValue(mode(opcode[0]), val, opCodePos+3, values)
-		return newState(opCodePos+4, values)
+		return newState(opCodePos+4, values, inputs, output)
 	case opExit:
+		halted++
 		return values
 	default:
 		panic(fmt.Sprintf("opcode not found: %d", opcode[3]))
 	}
 }
 
-const inputVal = 5
+var halted int64
 
-func bruteForce(values []int64, pos1 int64, pos2 int64) {
-	v := deepcopy.Copy(values).([]int64)
-	newState(0, v)
+var ph [][]int64
+
+func heapPermutation(a []int64, size int64, n int64) []int64 {
+	// if size becomes 1 then prints the obtained
+	// permutation
+	if size == 1 {
+		//log.Printf("%+v", a)
+		ph = append(ph, deepcopy.Copy(a).([]int64))
+		return a
+	}
+
+	for i := int64(0); i < size; i++ {
+		a = heapPermutation(a, size-1, n)
+		// if size is odd, swap first and last
+		// element
+		if size%2 == 1 {
+			temp := a[0]
+			a[0] = a[size-1]
+			a[size-1] = temp
+		} else {
+			temp := a[i]
+			a[i] = a[size-1]
+			a[size-1] = temp
+		}
+	}
+	return a
 }
 
+type amp struct {
+	input  chan int64
+	output chan int64
+	values []int64
+}
+
+func phase(values []int64, phases []int64) {
+	halted = 0
+	ampsLock := sync.RWMutex{}
+	amps := make([]amp, len(phases))
+	amps[0].input = make(chan int64, 4)
+	amps[0].input <- phases[0]
+	amps[0].input <- 0
+	amps[0].output = make(chan int64, 4)
+
+	amps[1].input = amps[0].output
+	amps[1].input <- phases[1]
+
+	amps[1].output = make(chan int64, 4)
+
+	amps[2].input = amps[1].output
+	amps[2].input <- phases[2]
+
+	amps[2].output = make(chan int64, 4)
+
+	amps[3].input = amps[2].output
+	amps[3].input <- phases[3]
+
+	amps[3].output = make(chan int64, 4)
+
+	amps[4].input = amps[3].output
+	amps[4].input <- phases[4]
+	amps[4].output = amps[0].input
+
+	for idx, _ := range phases {
+		ampsLock.Lock()
+		amp := amps[idx]
+		ampsLock.Unlock()
+		v := deepcopy.Copy(values).([]int64)
+		amp.values = v
+		go func() {
+			newState(0, amp.values, amp.input, amp.output)
+		}()
+	}
+
+	for halted != 5 {
+		//log.Printf("busy")
+	}
+
+	for _, amp := range amps {
+		select {
+		case m := <-amp.output:
+			if m > maxValue {
+				log.Printf("last %d %+v", m, phases)
+				maxValue = m
+			}
+		default:
+		}
+	}
+}
+
+var maxValue = int64(-1)
+
 func main() {
+	ph = make([][]int64, 0)
 	values := readLines()
-	bruteForce(values, 12, 0)
+	//ph = append(ph, []int64{9,8,7,6,5})
+	heapPermutation([]int64{9, 8, 7, 6, 5}, 5, 0)
+	for _, p := range ph {
+		log.Printf("%d", maxValue)
+		phase(values, p)
+	}
 }

@@ -97,37 +97,39 @@ func getValue(m mode, position int64, values []int64) int64 {
 	}
 }
 
-func newState(opCodePos int64, values []int64) []int64 {
+var currentOutput int64
+func newState(opCodePos int64, values []int64, inputs []int64) []int64 {
 	opcode := getOpcode(values[opCodePos])
 	switch operator(opcode[3]) {
 	case opAddition:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		pos2Val := getValue(mode(opcode[1]), opCodePos+2, values)
 		setValue(mode(opcode[0]), pos1Val+pos2Val, opCodePos+3, values)
-		return newState(opCodePos+4, values)
+		return newState(opCodePos+4, values, inputs)
 	case opMultiplier:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		pos2Val := getValue(mode(opcode[1]), opCodePos+2, values)
 		setValue(mode(opcode[0]), pos1Val*pos2Val, opCodePos+3, values)
-		return newState(opCodePos+4, values)
+		return newState(opCodePos+4, values, inputs)
 	case opInput:
-		values[values[opCodePos+1]] = inputVal
-		return newState(opCodePos+2, values)
+		values[values[opCodePos+1]] = inputs[0]
+		inputs = inputs[1:]
+		return newState(opCodePos+2, values, inputs)
 	case opOutput:
-		log.Printf("%d", values[values[opCodePos+1]])
-		return newState(opCodePos+2, values)
+		currentOutput =  values[values[opCodePos+1]]
+		return newState(opCodePos+2, values, inputs)
 	case opJumpTrue:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		if pos1Val != 0 {
-			return newState(getValue(mode(opcode[1]), opCodePos+2, values), values)
+			return newState(getValue(mode(opcode[1]), opCodePos+2, values), values, inputs)
 		}
-		return newState(opCodePos+3, values)
+		return newState(opCodePos+3, values, inputs)
 	case opJumpFalse:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		if pos1Val == 0 {
-			return newState(getValue(mode(opcode[1]), opCodePos+2, values), values)
+			return newState(getValue(mode(opcode[1]), opCodePos+2, values), values, inputs)
 		}
-		return newState(opCodePos+3, values)
+		return newState(opCodePos+3, values, inputs)
 	case opLessThan:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		pos2Val := getValue(mode(opcode[1]), opCodePos+2, values)
@@ -136,7 +138,7 @@ func newState(opCodePos int64, values []int64) []int64 {
 			val = 1
 		}
 		setValue(mode(opcode[0]), val, opCodePos+3, values)
-		return newState(opCodePos+4, values)
+		return newState(opCodePos+4, values, inputs)
 	case opEquals:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
 		pos2Val := getValue(mode(opcode[1]), opCodePos+2, values)
@@ -145,7 +147,7 @@ func newState(opCodePos int64, values []int64) []int64 {
 			val = 1
 		}
 		setValue(mode(opcode[0]), val, opCodePos+3, values)
-		return newState(opCodePos+4, values)
+		return newState(opCodePos+4, values, inputs)
 	case opExit:
 		return values
 	default:
@@ -153,14 +155,51 @@ func newState(opCodePos int64, values []int64) []int64 {
 	}
 }
 
-const inputVal = 5
+var ph [][]int64
+func heapPermutation(a []int64, size int64, n int64) []int64 {
+	// if size becomes 1 then prints the obtained
+	// permutation
+	if size == 1 {
+		//log.Printf("%+v", a)
+		ph = append(ph, deepcopy.Copy(a).([]int64))
+		return a
+	}
 
-func bruteForce(values []int64, pos1 int64, pos2 int64) {
-	v := deepcopy.Copy(values).([]int64)
-	newState(0, v)
+	for i := int64(0); i < size; i++ {
+		a = heapPermutation(a, size-1, n)
+		// if size is odd, swap first and last
+		// element
+		if size%2 == 1 {
+			temp := a[0]
+			a[0] = a[size-1]
+			a[size-1] = temp
+		} else {
+			temp := a[i]
+			a[i] = a[size-1]
+			a[size-1] = temp
+		}
+	}
+    return a
+}
+
+var maxValue = int64(-1)
+func phase(values []int64, phases []int64) {
+	for _, phase := range phases {
+		v := deepcopy.Copy(values).([]int64)
+		newState(0, v, []int64{phase, currentOutput})
+	}
+	if currentOutput > maxValue {
+		log.Printf("%d, %v", currentOutput, phases)
+		maxValue = currentOutput
+	}
+	currentOutput = 0
 }
 
 func main() {
+	ph = make([][]int64, 0)
 	values := readLines()
-	bruteForce(values, 12, 0)
+	heapPermutation([]int64{0,1,2,3,4}, 5, 0)
+	for _, p := range ph {
+		phase(values, p)
+	}
 }
