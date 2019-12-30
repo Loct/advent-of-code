@@ -86,7 +86,7 @@ func main() {
 			if digit == black {
 				formatted += "  "
 			} else {
-				formatted += "1 "
+				formatted += "x "
 			}
 		}
 		log.Printf("%s", formatted)
