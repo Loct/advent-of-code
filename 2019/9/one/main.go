@@ -125,7 +125,7 @@ func newState(opCodePos int64, values []int64, inputs chan int64, output chan in
 		return newState(opCodePos+2, values, inputs, output)
 	case opOutput:
 		v := getValue(mode(opcode[2]), opCodePos+1, values)
-		log.Printf("%d", v)
+		output <- v
 		return newState(opCodePos+2, values, inputs, output)
 	case opJumpTrue:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
@@ -181,7 +181,7 @@ func run(values []int64) {
 	halted = 0
 	amps := make([]amp, 1)
 	amps[0].input = make(chan int64, 2)
-	amps[0].input <- 2
+	amps[0].input <- 1
 	amps[0].output = make(chan int64, 100)
 
 	for len(values) < 5000 {
@@ -189,6 +189,20 @@ func run(values []int64) {
 	}
 	v := deepcopy.Copy(values).([]int64)
 	newState(0, v, amps[0].input, amps[0].output)
+
+	done := false
+	for {
+		select {
+		case m := <-amps[0].output:
+			log.Printf("%d", m)
+		default:
+			done = true
+			break
+		}
+		if done {
+			break
+		}
+	}
 }
 
 func main() {

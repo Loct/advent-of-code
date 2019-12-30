@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 func readLines() []int64 {
@@ -42,12 +41,15 @@ const opJumpTrue operator = 5
 const opJumpFalse operator = 6
 const opLessThan operator = 7
 const opEquals operator = 8
+const opRelativeBaseUpdate operator = 9
+
 const opExit operator = 99
 
 type mode int64
 
-const immediateMode mode = 1
 const positionMode mode = 0
+const immediateMode mode = 1
+const relativeMode mode = 2
 
 func getOpcode(input int64) []int64 {
 	digits := strconv.FormatInt(input, 10)
@@ -82,10 +84,14 @@ func setValue(m mode, value int64, position int64, values []int64) {
 		values[position] = value
 	case positionMode:
 		values[values[position]] = value
+	case relativeMode:
+		values[relativeBase+values[position]] = value
 	default:
 		panic(fmt.Sprintf("mode %d not found", m))
 	}
 }
+
+var relativeBase int64
 
 func getValue(m mode, position int64, values []int64) int64 {
 	switch m {
@@ -93,6 +99,8 @@ func getValue(m mode, position int64, values []int64) int64 {
 		return values[position]
 	case positionMode:
 		return values[values[position]]
+	case relativeMode:
+		return values[relativeBase+values[position]]
 	default:
 		panic(fmt.Sprintf("mode %d not found", m))
 	}
@@ -112,11 +120,12 @@ func newState(opCodePos int64, values []int64, inputs chan int64, output chan in
 		setValue(mode(opcode[0]), pos1Val*pos2Val, opCodePos+3, values)
 		return newState(opCodePos+4, values, inputs, output)
 	case opInput:
-		values[values[opCodePos+1]] = <-inputs
+		v := <-inputs
+		setValue(mode(opcode[2]), v, opCodePos+1, values)
 		return newState(opCodePos+2, values, inputs, output)
 	case opOutput:
-		//log.Printf("%d", values[values[opCodePos+1]])
-		output <- values[values[opCodePos+1]]
+		v := getValue(mode(opcode[2]), opCodePos+1, values)
+		log.Printf("%d", v)
 		return newState(opCodePos+2, values, inputs, output)
 	case opJumpTrue:
 		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
@@ -148,6 +157,10 @@ func newState(opCodePos int64, values []int64, inputs chan int64, output chan in
 		}
 		setValue(mode(opcode[0]), val, opCodePos+3, values)
 		return newState(opCodePos+4, values, inputs, output)
+	case opRelativeBaseUpdate:
+		pos1Val := getValue(mode(opcode[2]), opCodePos+1, values)
+		relativeBase = relativeBase + pos1Val
+		return newState(opCodePos+2, values, inputs, output)
 	case opExit:
 		halted++
 		return values
@@ -158,105 +171,41 @@ func newState(opCodePos int64, values []int64, inputs chan int64, output chan in
 
 var halted int64
 
-var ph [][]int64
-
-func heapPermutation(a []int64, size int64, n int64) []int64 {
-	// if size becomes 1 then prints the obtained
-	// permutation
-	if size == 1 {
-		//log.Printf("%+v", a)
-		ph = append(ph, deepcopy.Copy(a).([]int64))
-		return a
-	}
-
-	for i := int64(0); i < size; i++ {
-		a = heapPermutation(a, size-1, n)
-		// if size is odd, swap first and last
-		// element
-		if size%2 == 1 {
-			temp := a[0]
-			a[0] = a[size-1]
-			a[size-1] = temp
-		} else {
-			temp := a[i]
-			a[i] = a[size-1]
-			a[size-1] = temp
-		}
-	}
-	return a
-}
-
 type amp struct {
 	input  chan int64
 	output chan int64
 	values []int64
 }
 
-func phase(values []int64, phases []int64) {
+func run(values []int64) {
 	halted = 0
-	ampsLock := sync.RWMutex{}
-	amps := make([]amp, len(phases))
-	amps[0].input = make(chan int64, 4)
-	amps[0].input <- phases[0]
-	amps[0].input <- 0
-	amps[0].output = make(chan int64, 4)
+	amps := make([]amp, 1)
+	amps[0].input = make(chan int64, 2)
+	amps[0].input <- 2
+	amps[0].output = make(chan int64, 100)
 
-	amps[1].input = amps[0].output
-	amps[1].input <- phases[1]
-
-	amps[1].output = make(chan int64, 4)
-
-	amps[2].input = amps[1].output
-	amps[2].input <- phases[2]
-
-	amps[2].output = make(chan int64, 4)
-
-	amps[3].input = amps[2].output
-	amps[3].input <- phases[3]
-
-	amps[3].output = make(chan int64, 4)
-
-	amps[4].input = amps[3].output
-	amps[4].input <- phases[4]
-	amps[4].output = amps[0].input
-
-	for idx, _ := range phases {
-		ampsLock.Lock()
-		amp := amps[idx]
-		ampsLock.Unlock()
-		v := deepcopy.Copy(values).([]int64)
-		amp.values = v
-		go func() {
-			newState(0, amp.values, amp.input, amp.output)
-		}()
+	for len(values) < 5000 {
+		values = append(values, 0)
 	}
+	v := deepcopy.Copy(values).([]int64)
+	newState(0, v, amps[0].input, amps[0].output)
 
-	for halted != 5 {
-		//log.Printf("busy")
-	}
-
-	for _, amp := range amps {
+	done := false
+	for {
 		select {
-		case m := <-amp.output:
-			if m > maxValue {
-				log.Printf("last %d %+v", m, phases)
-				maxValue = m
-			}
+		case m := <-amps[0].output:
+			log.Printf("%d", m)
 		default:
+			done = true
+			break
+		}
+		if done {
 			break
 		}
 	}
 }
 
-var maxValue = int64(-1)
-
 func main() {
-	ph = make([][]int64, 0)
 	values := readLines()
-	//ph = append(ph, []int64{9,8,7,6,5})
-	heapPermutation([]int64{9, 8, 7, 6, 5}, 5, 0)
-	for _, p := range ph {
-		log.Printf("%d", maxValue)
-		phase(values, p)
-	}
+	run(values)
 }
